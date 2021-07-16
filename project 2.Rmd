@@ -1,0 +1,198 @@
+---
+title: "Analysis of the effect of properties of furniture on the cost"
+author: "Ho Kwan Tang, Calli Dougall, Yufeng Zhang, Rui Sun, Bixia Gan"
+output:
+  pdf_document:
+    latex_engine: pdflatex
+    number_sections: no
+  html_document:
+    df_print: paged
+fig_caption: yes
+---
+
+```{r libraries, echo = FALSE, warning = FALSE, message = FALSE}
+library(tidyverse)
+library(moderndive)
+library(pastecs)
+library(skimr)
+library(kableExtra)
+library(gridExtra)
+library(dplyr)
+library(knitr)
+library(MASS)
+library(GGally)
+library(sjPlot)
+```
+
+# Introduction {#sec:Intro}
+This project will determine the properties of furniture that have a significant impact on the price which are more than 1000 Saudi Riyals by fitting a generalised linear model (GLM) and will assess the models predictive capability. 
+
+# Research question {#sec:RQ}
+Specifically, this project focuses on the following research question:
+
+What properties of furniture have a significant impact on its price which is more than 1000 Saudi Riyals in Generalised Linear model? 
+
+# Data processing {#sec:DP}
+The original data set consists of 500 observations. The following R codes randomly the data split into training data and testing data, with weights 75% and 25% respectively.
+The data sets includes 6 continuous input variables (`category`, `sellable_online`, `other_colors`, `depth`, `height`, `width`) with missing data. 
+Among all the variables, three properties(`depth`, `height`, `width`) are the numerical values, and two properties(`sellable_online`, `other_colors`) are determined by TRUE and FALSE, so set 1 for TRUE(Yes) and 0 for FALSE(No). The last property(`category`) have the name of furniture which it belongs to the 17 different categories.
+As for the missing values in the file, we set it with the mean of each property.
+```{r data, echo = TRUE}
+set.seed(2021)
+data <- read.table("C:/Users/admin/Desktop/dataset25_new.csv",sep = ",", header = TRUE)
+
+data$sellable_online[data$sellable_online==TRUE] <- 1
+data$sellable_online[data$sellable_online==FALSE] <- 0
+data$other_colors[data$other_colors=="Yes"] <- 1
+data$other_colors[data$other_colors=="No"] <- 0
+
+data$depth[is.na(data$depth)]=mean(data$depth,na.rm=T)
+data$height[is.na(data$height)]=mean(data$height,na.rm=T)
+data$width[is.na(data$width)]=mean(data$width,na.rm=T)
+
+n <- nrow(data)
+ind1 <- sample(c(1:n),round(3*n/4))
+ind2 <- setdiff(c(1:n),c(ind1))
+train_data <- data[ind1,]
+test_data <- data[ind2,]
+write.csv(train_data, file = "train_data.csv", row.names = FALSE)
+write.csv(test_data, file = "test_data.csv", row.names = FALSE)
+
+sample_sizes = cbind(nrow(train_data),nrow(test_data))
+rownames(sample_sizes) = c("sample size")
+colnames(sample_sizes) = c("training data", "testing data")
+```
+
+From table above, we can see the sample has been split into 375 and 125 observations for our training and testing data sets, respectively.
+
+# Exploratory Data Analysis {#sec:EDA}
+
+Summary statistics of each of the variables in the training data set are presented in table below.
+We can see that the median and the mean of depth, height and sellable_online are almost the same(52.01 and 52.47 in depth , 101.73 and 102.80 in height, 1.00 and 0.99 in sellable_online). However, width seems to be skewed distribution, which is proved by the mean and median are different and the standard deviation is wider.
+
+```{r summary, echo = TRUE}
+summary = stat.desc(train_data[,5:9], basic=TRUE)
+summary = summary[c(4,5,8,9,13),]
+rownames(summary) = c("min","max","median","mean","std.dev")
+colnames(summary) = c("sellable_online","other_colors","depth","height","width")
+kable(summary) %>%
+kable_styling(latex_options = "hold_position")
+```
+
+# Data Analysis {#sec:DA}
+
+We began by fitting the first order full MLR model of the following form:
+
+$$ \ln\left(\frac{p}{1-p}\right) = \hat{\alpha} + \widehat{\beta}_{\mbox{sellable_online}}\cdot\mathbb{I}_{\mbox{sellable_online}}(x) + 
+\widehat{\beta}_{\mbox{other_colors}}\cdot\mathbb{I}_{\mbox{other_colors}}(x) + \widehat{\beta}_{depth}X_{3i} + \widehat{\beta}_{height}X_{4i} + \widehat{\beta}_{width}X_{5i}$$
+Where
+
+* $p$ is the probability of the price equal to or more than 1000 Saudi Riyals, and $1-p$ is the probability of price less than 1000
+* $\hat{\alpha}$ is the intercept, the baseline level of price
+* all the $\hat{\beta}$ are the slope coefficient associated with the individual exploratory variables
+* $X_i$ is the value of the corresponding explanatory variable for the $i^{th}$ observation 
+* $\mathbb{I}_{\mbox{sellable_online}}(x)$ is an indicator function such that
+$$\mathbb{I}_{\mbox{sellable_online}}(x)=\left\{
+\begin{array}{ll}
+1 ~~~ \mbox{if the way buy funiture of} ~ x \mbox{th observation is online},\\
+0 ~~~ \mbox{Otherwise}.\\
+\end{array}
+\right.$$
+* $\mathbb{I}_{\mbox{other_colors}}(x)$ is an indicator function such that
+$$\mathbb{I}_{\mbox{other_colors}}(x)=\left\{
+\begin{array}{ll}
+1 ~~~ \mbox{if the color of} ~ x \mbox{th observation is other colors},\\
+0 ~~~ \mbox{Otherwise}.\\
+\end{array}
+\right.$$
+
+The following model seems not appropriate, for the p-value are all more than 0.05, so all the variables are not significant in this model. Therefore, we need to consider deleting the insignificant variables through stepwise method.
+
+``` {R fullmodel, echo=TRUE, eval=TRUE, out.width = '80%', fig.align = "center", fig.pos = 'H'}
+full_model  <- glm(price2 ~ sellable_online + other_colors + depth*height*width, data = train_data, family = binomial(link = "logit"))
+summary(full_model)
+```
+
+Stepwise regression was undertaken to determine the best-fitting model based on AIC. We began with the full model as the initial model, then variables were systematically added or removed (i.e. both forward and backward selection) based on a defined criterion, the lower AIC. From the R output below, we can see that the "best" model has variables depth, height, width and the interaction between depth and width. Also, AIC of the "best" model is 138.12.
+
+```{r stepwise, echo = TRUE, eval= TRUE, warning=FALSE, message=FALSE}
+step_model1 = step(full_model)
+```
+
+However, in the summary of the model, we can see that p-value of intercept is much more than 0.05, which is not good enough to fit the model. So we can try to delete it and fit a new model.
+
+``` {R model3, echo=TRUE, eval=TRUE, out.width = '80%', fig.align = "center", fig.pos = 'H'}
+model3  <- glm(price2 ~ depth + height + width +depth*width , data = train_data, family = binomial(link = "logit"))
+summary(model3)
+```
+
+Here, we cam see that it seems that the model is good. And the AIC decreases to 136.17.
+
+``` {R finalmodel, echo=TRUE, eval=TRUE, out.width = '80%', fig.align = "center", fig.pos = 'H'}
+final_model  <- glm(price2 ~ depth + height + width +depth*width - 1, data = train_data, family = binomial(link = "logit"))
+summary(final_model)
+```
+
+Thus, the fitted GLM model has the following form:
+
+$$ \ln\left(\frac{p}{1-p}\right) =  -0.103 \cdot X_{depth_i} + 0.009 \cdot X_{height_i} - 0.049 \cdot X_{width_i} + 0.002 \cdot X_{inter_i}$$
+where 
+
+* $p$ is the probibility of the price is no less than 1000
+* $X_{depth_i}$ is the value of the corresponding explanatory variable for the $i^{th}$ observation  
+* $\hat{\beta} = -0.103$ is the slope coefficient associated with the exploratory variable `depth`, and summarizes the relationship between price and depth. Hence, the log-odds of the price is more than 1000 decrease by 0.103 for every one unit increase in depth.
+* The remaining $\hat{\beta}$ coefficients are interpreted in a similar way.
+
+This provides us with a point estimate of how the log-odds changes with the variables, however, we are also interested in producing a 95% confidence interval for these log-odds. The confidence intervals of the coefficients of the final model are shown below:
+
+``` {R ci_final_model}
+confint(final_model) %>%
+  kable()
+```
+
+``` {R ci_plot}
+plot_model(final_model, show.values = TRUE, transform = NULL,
+           title = "Log-Odds (Price of furniture)", show.p = FALSE)
+```
+
+From the estimates above, increasing the components of height and the interaction between depth and width appears to increase the probability of price more than 1000 of the furniture, whereas depth and width has a negative effect on price. From the coefficients, we conclude that there is not one variable that appears to be hugely influential over the rest when determining price.
+
+The following code produces figure, which displays a plot of the residuals against the fitted values. From this it is evident the residuals are evenly scattered around zero. Also, the spread of the residuals remains constant across the fitted values. Hence the model assumptions of the residuals having mean zero and constant variance appear valid. Also, the next figure shows a histogram of the residuals, it appears a normal pattern centered at zero. Hence, it is concluded that the assumptions of the GLM model hold.
+
+```{r residual, echo = TRUE, out.width = '80%', fig.align = "center", fig.pos = 'H'}
+
+residual = as.vector(final_model[[2]])
+fitted_value = as.vector(final_model[[5]])
+dummy = cbind(residual,fitted_value)
+dummy = as.data.frame(dummy)
+ggplot(dummy, aes(x = fitted_value, y = residual)) +
+  geom_point() +
+  labs(x = "Fitted value", y = "Residual")  +
+  geom_hline(yintercept = 0, col = "blue", size = 1)
+```
+
+```{r hist, echo = TRUE, out.width = '80%', fig.align = "center", fig.pos = 'H'}
+ggplot(dummy, aes(x = residual)) +
+  geom_histogram(color = "white") +
+  labs(x = "Residual")
+```
+
+
+
+
+
+
+
+
+# Conclusions {#sec:Conc}
+This project constructs a GLM model using stepwise regression method to explore the relationship between furniture price and its components. It is found that the model with significant variables depth,height, width and the interaction between depth and width perform the lowest AIC 136.17. Height and the interaction have a positive impact on the price, whereas depth and width has a negative impact. However, none of these dominate the results.
+
+
+
+
+
+
+
+
+
+
